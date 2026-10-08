@@ -1,9 +1,12 @@
 from typing import List, TypedDict
 
-from flask import session
+from flask import request, session
 import requests
 
-from constants import API_SECRET_KEY, API_URL
+from constants import API_URL
+
+# сколько секунд ждём ответа портала
+TIMEOUT = 10
 
 
 class Game(TypedDict):
@@ -16,23 +19,20 @@ class Game(TypedDict):
     gamePublicationDate: str
 
 
-def get_all_games() -> List[Game]:
+class ApiError(Exception):
+    """Ошибка обращения к API портала (сеть/HTTP/формат ответа)."""
+
+
+def get_game_session() -> tuple[int | None, str | None]:
     """
-    Функция, которая обращается к API рудзынг и возвращает все игры разработчика
+    Игровая сессия, выданная порталом: (?session=<id>&token=<hmac>).
+    Возвращает (gameSessionId, token) или (None, None).
     """
-
-    headers = {"X-API-Key": API_SECRET_KEY}
-
-    response = requests.get(f"{API_URL}/games/my", headers=headers)
-    response.raise_for_status()
-
-    data = response.json()
-    print(data)
-
-    if isinstance(data, list):
-        return data
-
-    return []
+    raw = request.args.get("session") if request else None
+    if raw is not None and raw.isdigit():
+        session["game_session_id"] = int(raw)
+        session["game_session_token"] = request.args.get("token")
+    return session.get("game_session_id"), session.get("game_session_token")
 
 
 def get_points() -> int | None:
@@ -40,22 +40,17 @@ def get_points() -> int | None:
     Функция, которая обращается к API рудзынг и возвращает количество баллов у игрока
     """
 
-    headers = {"X-API-Key": API_SECRET_KEY}
-
     user_id = session.get("user_id")
 
-    print(user_id)
-
     if not user_id:
-        raise Exception("Не записан user_id в сессию.")
+        raise ApiError("Не записан user_id в сессию.")
 
-    response = requests.get(f"{API_URL}/users/{user_id}/points", headers=headers)
+    response = requests.get(f"{API_URL}/users/{user_id}/points", timeout=TIMEOUT)
 
     if response.status_code != 200:
-        raise Exception(f"Ошибка API: {response.text}")
+        raise ApiError(f"Ошибка API: {response.text}")
 
     data = response.json()
-    print(data)
 
     if isinstance(data, int):
         return data
@@ -70,12 +65,10 @@ def login(email: str, password: str) -> str:
     Функция, с помощью которой пользователь входит в свой аккаунт и получает свой userId
     """
 
-    headers = {"X-API-Key": API_SECRET_KEY}
-
     user_data = {"email": email, "password": password}
 
     response = requests.post(
-        f"{API_URL}/account/login", json=user_data, headers=headers
+        f"{API_URL}/account/login", json=user_data, timeout=TIMEOUT
     )
     response.raise_for_status()
 
@@ -93,54 +86,29 @@ def login(email: str, password: str) -> str:
     return user_id
 
 
-def ping():
-    """
-    Функция, которая проверяет жив ли API рудзынг
-    """
-
-    headers = {"X-API-Key": API_SECRET_KEY}
-
-    response = requests.get(f"{API_URL}/ping", headers=headers)
-    response.raise_for_status()
-
-    if response.status_code != 200:
-        raise Exception("Сервер недоступен")
-
-    return response.json()
-
-
 def post_points(amount: int) -> int:
     """
-    Функция, с помощью которой разработчик начисляет баллы пользователю и отправляет их в API рудзынг
+    Функция, с помощью которой разработчик начисляет баллы пользователю и отправляет их в API рудзынг.
+    Работает через игровую сессию портала (?session=...&token=...), когда игра запущена в iframe портала.
     """
 
-    user_id = session.get("user_id")
+    game_session_id, token = get_game_session()
 
-    if not user_id:
-        raise Exception("Не записан user_id в сессию.")
+    if not game_session_id:
+        raise ApiError("Игра запущена не с портала: сессия не выдана.")
 
-    games = get_all_games()
-    game_id = None
-
-    for game in games:
-        if game.get("gameTitle") == "Тестовая игра":
-            game_id = game.get("gameId")
-            break
-    else:
-        raise Exception("Нет игры с таким названием")
-
-    headers = {"X-API-Key": API_SECRET_KEY}
+    if amount <= 0:
+        raise ApiError("Количество баллов должно быть положительным")
 
     response = requests.post(
-        f"{API_URL}/users/{user_id}/games/{game_id}/points",
-        json={"amount": amount},
-        headers=headers,
+        f"{API_URL}/score",
+        json={"gameSessionId": game_session_id, "score": amount, "token": token},
+        timeout=TIMEOUT,
     )
 
     if response.status_code != 200:
-        raise Exception(f"Ошибка API: {response.text}")
+        raise ApiError(f"Ошибка API: {response.text}")
 
     data = response.json()
 
     return data.get("newTotalPoints")
-

@@ -4,7 +4,7 @@ from flask import Flask, redirect, render_template, request, session, url_for, j
 
 from constants import APP_SECRET_KEY
 
-from api_rudzyng import login as API_login, get_points, post_points
+from api_rudzyng import get_game_session, login as API_login, get_points, post_points
 
 app = Flask(__name__)
 app.secret_key = APP_SECRET_KEY
@@ -12,6 +12,8 @@ app.secret_key = APP_SECRET_KEY
 
 @app.route("/")
 def index():
+    # игровая сессия портала: iframe передаёт ?session=<id>&token=<hmac>
+    get_game_session()
     user_id = session.get("user_id", None)
     user_points = session.get("user_points", None)
     error = session.get("error")
@@ -19,6 +21,7 @@ def index():
     return render_template(
         "index.html", user_id=user_id, points=user_points, error=error
     )
+
 
 
 @app.route("/login", methods=["GET", "POST"])

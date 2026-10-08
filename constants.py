@@ -1,3 +1,8 @@
-API_URL = "http://158.160.104.26:9001/api"
-APP_SECRET_KEY = "super-ultimate-secret-duper-notencrypted-key"
-API_SECRET_KEY="super-duper-ultimate-secret-key-from-api"
+import os
+
+# Адрес API портала Рудзынг.рф.
+# Локально задайте переменную окружения LINGVO_API_URL.
+API_URL = os.environ.get("LINGVO_API_URL", "http://game.рудзынг.рф/api")
+
+# Ключ сессий flask-приложения. Обязательно переопределить в проде!
+APP_SECRET_KEY = os.environ.get("APP_SECRET_KEY", "change-me-in-production")
