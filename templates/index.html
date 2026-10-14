@@ -65,20 +65,20 @@
 
   <div class="buttons-container flex flex-col gap-3">
     {% if not user_id %}
-    <a class="link-button text-center" href="/login">Авторизация в рудзынг.рф</a>
+    <a class="link-button text-center" href="{{ url_for('login') }}">Авторизация в рудзынг.рф</a>
     {% endif %}
 
     {% if user_id %}
-    <form action="/points" method="get">
+    <form action="{{ url_for('points') }}" method="get">
       <input type="hidden" value="get" name="action" />
       <button id="get-points" type="submit">Получить баллы</button>
     </form>
-    <form action="/points" method="post" class="flex flex-col gap-2">
+    <form action="{{ url_for('points') }}" method="post" class="flex flex-col gap-2">
       <input type="hidden" value="add" name="action" />
       <input type="number" name="points" placeholder="Баллы" required class="border-2 border-gray-300 rounded" />
       <button id="post-points" type="submit">Добавить баллы пользователю</button>
     </form>
-    <a href="/logout" class="link-button text-center bg-red-500! text-white hover:bg-red-600! hover:text-white! border-none">
+    <a href="{{ url_for('logout') }}" class="link-button text-center bg-red-500! text-white hover:bg-red-600! hover:text-white! border-none">
       Выйти
     </a>
     {% endif %}
@@ -93,7 +93,7 @@
 
 {% if error %}
 <div class="mt-4 px-4">
-  <h2 class="points-text text-red-500 text-center">{{ error["message"] }}</h2>
+  <h2 class="points-text text-red-500 text-center">{{ error }}</h2>
 </div>
 {% endif %}
 {% endblock %}

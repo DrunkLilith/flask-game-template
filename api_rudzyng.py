@@ -96,6 +96,8 @@ def post_points(amount: int) -> int:
 
     if not game_session_id:
         raise ApiError("Игра запущена не с портала: сессия не выдана.")
+    if not token:
+        raise ApiError("Портал не передал токен игровой сессии.")
 
     if amount <= 0:
         raise ApiError("Количество баллов должно быть положительным")
@@ -111,4 +113,7 @@ def post_points(amount: int) -> int:
 
     data = response.json()
 
-    return data.get("newTotalPoints")
+    if not isinstance(data, dict) or "newTotalPoints" not in data:
+        raise ApiError("API вернул некорректный ответ на начисление баллов.")
+
+    return data["newTotalPoints"]

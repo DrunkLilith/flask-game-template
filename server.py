@@ -1,6 +1,9 @@
+import os
+
 import requests
 
-from flask import Flask, redirect, render_template, request, session, url_for, jsonify
+from flask import Flask, redirect, render_template, request, session, url_for
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from constants import APP_SECRET_KEY
 
@@ -8,19 +11,35 @@ from api_rudzyng import get_game_session, login as API_login, get_points, post_p
 
 app = Flask(__name__)
 app.secret_key = APP_SECRET_KEY
+path_base = os.environ.get("GAME_PATH_BASE", "").rstrip("/")
+app.config["APPLICATION_ROOT"] = path_base or "/"
+app.config["SESSION_COOKIE_PATH"] = path_base or "/"
+app.config["SESSION_COOKIE_NAME"] = os.environ.get(
+    "GAME_COOKIE_NAME", "lingvogameos_flask_template_session"
+)
+app.wsgi_app = ProxyFix(
+    app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1
+)
 
 
 @app.route("/")
 def index():
-    # игровая сессия портала: iframe передаёт ?session=<id>&token=<hmac>
+    # Также поддерживаем открытие корня с query для локальной отладки.
     get_game_session()
     user_id = session.get("user_id", None)
     user_points = session.get("user_points", None)
-    error = session.get("error")
+    error = session.pop("error", None)
 
     return render_template(
         "index.html", user_id=user_id, points=user_points, error=error
     )
+
+
+@app.route("/start")
+def start():
+    """Точка входа портала: сохраняет session/token и убирает их из URL."""
+    get_game_session()
+    return redirect(url_for("index"))
 
 
 
@@ -53,7 +72,7 @@ def logout():
     session.pop("user_id", None)
     session.pop("user_points", None)
 
-    return render_template("index.html")
+    return redirect(url_for("index"))
 
 
 @app.route("/points", methods=["GET", "POST"])
@@ -65,10 +84,13 @@ def points():
             points = int(request.form.get("points", 0))
             session["user_points"] = post_points(points)
         except Exception as e:
-            session["error"] = e
+            session["error"] = str(e)
 
     return redirect(url_for("index"))
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=5000)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("GAME_PORT", "5000")),
+    )
