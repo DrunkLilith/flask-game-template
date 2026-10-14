@@ -1,13 +1,11 @@
 import os
 
-import requests
-
 from flask import Flask, redirect, render_template, request, session, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from constants import APP_SECRET_KEY
+from api_rudzyng import ApiError, post_points, resolve_game_session
 
-from api_rudzyng import get_game_session, login as API_login, get_points, post_points
 
 app = Flask(__name__)
 app.secret_key = APP_SECRET_KEY
@@ -24,68 +22,39 @@ app.wsgi_app = ProxyFix(
 
 @app.route("/")
 def index():
-    # Также поддерживаем открытие корня с query для локальной отладки.
-    get_game_session()
-    user_id = session.get("user_id", None)
-    user_points = session.get("user_points", None)
-    error = session.pop("error", None)
+    # Поддерживаем прямое открытие корня с query для локальной отладки.
+    if request.args.get("session") is not None:
+        try:
+            resolve_game_session()
+        except ApiError as exc:
+            return str(exc), 401
 
     return render_template(
-        "index.html", user_id=user_id, points=user_points, error=error
+        "index.html",
+        user_name=session.get("portal_user_name"),
+        points=session.get("portal_total_points"),
+        has_game_session=bool(session.get("game_session_id")),
+        error=session.pop("error", None),
     )
 
 
 @app.route("/start")
 def start():
-    """Точка входа портала: сохраняет session/token и убирает их из URL."""
-    get_game_session()
-    return redirect(url_for("index"))
-
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "GET":
-        return render_template("login.html")
-
-    email = request.form.get("email")
-    password = request.form.get("password")
-
-    if not (email and password):
-        return render_template("login.html", error={"message": "ERROR!!!"})
-
+    """Проверенная точка входа портала; query затем убирается из URL."""
     try:
-        API_login(email, password)
-    except requests.exceptions.RequestException as e:
-        print(f"Ошибка API login: {e}")
-        return render_template("login.html", error={"message": "ERROR!!!"})
-    except ValueError:
-        return render_template(
-            "login.html", error={"message": "Неверный ответ от сервера"}
-        )
-
+        resolve_game_session()
+    except ApiError as exc:
+        return str(exc), 401
     return redirect(url_for("index"))
 
 
-@app.route("/logout")
-def logout():
-    session.pop("user_id", None)
-    session.pop("user_points", None)
-
-    return redirect(url_for("index"))
-
-
-@app.route("/points", methods=["GET", "POST"])
+@app.route("/points", methods=["POST"])
 def points():
-    if request.method == "GET":
-        session["user_points"] = get_points()
-    elif request.method == "POST":
-        try:
-            points = int(request.form.get("points", 0))
-            session["user_points"] = post_points(points)
-        except Exception as e:
-            session["error"] = str(e)
-
+    try:
+        amount = int(request.form.get("points", 0))
+        post_points(amount)
+    except (ApiError, TypeError, ValueError) as exc:
+        session["error"] = str(exc)
     return redirect(url_for("index"))
 
 

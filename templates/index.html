@@ -64,32 +64,20 @@
   </h2>
 
   <div class="buttons-container flex flex-col gap-3">
-    {% if not user_id %}
-    <a class="link-button text-center" href="{{ url_for('login') }}">Авторизация в рудзынг.рф</a>
-    {% endif %}
-
-    {% if user_id %}
-    <form action="{{ url_for('points') }}" method="get">
-      <input type="hidden" value="get" name="action" />
-      <button id="get-points" type="submit">Получить баллы</button>
-    </form>
+    {% if has_game_session %}
+    <p class="points-text text-center">
+      Игрок: <strong>{{ user_name }}</strong><br>
+      Баллы портала: <strong>{{ points }}</strong>
+    </p>
     <form action="{{ url_for('points') }}" method="post" class="flex flex-col gap-2">
-      <input type="hidden" value="add" name="action" />
       <input type="number" name="points" placeholder="Баллы" required class="border-2 border-gray-300 rounded" />
-      <button id="post-points" type="submit">Добавить баллы пользователю</button>
+      <button id="post-points" type="submit">Отправить итог партии</button>
     </form>
-    <a href="{{ url_for('logout') }}" class="link-button text-center bg-red-500! text-white hover:bg-red-600! hover:text-white! border-none">
-      Выйти
-    </a>
+    {% else %}
+    <p class="points-text text-center">Запустите игру из LingvoGameOs.</p>
     {% endif %}
   </div>
 </section>
-
-{% if points %}
-<div class="mt-4 px-4">
-  <h2 class="points-text text-green-500 text-center font-semibold">Баллы пользователя: {{ points }}</h2>
-</div>
-{% endif %}
 
 {% if error %}
 <div class="mt-4 px-4">

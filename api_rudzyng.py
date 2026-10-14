@@ -1,119 +1,103 @@
-from typing import List, TypedDict
+"""Клиент актуального API игровой сессии LingvoGameOs."""
+
+import os
 
 from flask import request, session
 import requests
 
 from constants import API_URL
 
-# сколько секунд ждём ответа портала
+
 TIMEOUT = 10
 
 
-class Game(TypedDict):
-    """
-    Объект игры, который возвращается в качестве ответа из API
-    """
-
-    gameTitle: str
-    gameId: int
-    gamePublicationDate: str
-
-
 class ApiError(Exception):
-    """Ошибка обращения к API портала (сеть/HTTP/формат ответа)."""
+    """Ошибка сети, HTTP, конфигурации или формата ответа портала."""
 
 
-def get_game_session() -> tuple[int | None, str | None]:
-    """
-    Игровая сессия, выданная порталом: (?session=<id>&token=<hmac>).
-    Возвращает (gameSessionId, token) или (None, None).
-    """
-    raw = request.args.get("session") if request else None
-    if raw is not None and raw.isdigit():
-        session["game_session_id"] = int(raw)
-        session["game_session_token"] = request.args.get("token")
+def _capture_game_session() -> tuple[int | None, str | None]:
+    """Сохраняет ``session``/``token`` из query точки входа портала."""
+    raw_session_id = request.args.get("session")
+    if raw_session_id is not None:
+        if not raw_session_id.isdigit() or int(raw_session_id) <= 0:
+            raise ApiError("Портал передал некорректный ID игровой сессии.")
+        return int(raw_session_id), request.args.get("token")
     return session.get("game_session_id"), session.get("game_session_token")
 
 
-def get_points() -> int | None:
-    """
-    Функция, которая обращается к API рудзынг и возвращает количество баллов у игрока
-    """
-
-    user_id = session.get("user_id")
-
-    if not user_id:
-        raise ApiError("Не записан user_id в сессию.")
-
-    response = requests.get(f"{API_URL}/users/{user_id}/points", timeout=TIMEOUT)
-
-    if response.status_code != 200:
-        raise ApiError(f"Ошибка API: {response.text}")
-
-    data = response.json()
-
-    if isinstance(data, int):
-        return data
-    elif isinstance(data, dict):
-        return data.get("points")
-
-    return None
-
-
-def login(email: str, password: str) -> str:
-    """
-    Функция, с помощью которой пользователь входит в свой аккаунт и получает свой userId
-    """
-
-    user_data = {"email": email, "password": password}
-
-    response = requests.post(
-        f"{API_URL}/account/login", json=user_data, timeout=TIMEOUT
-    )
-    response.raise_for_status()
-
-    data = response.json()
-    user_id = None
-
-    if isinstance(data, dict):
-        user_id = data.get("userId")
-
-    if not user_id:
-        raise Exception("Не удалось получить ID пользователя")
-
-    session["user_id"] = user_id
-
-    return user_id
-
-
-def post_points(amount: int) -> int:
-    """
-    Функция, с помощью которой разработчик начисляет баллы пользователю и отправляет их в API рудзынг.
-    Работает через игровую сессию портала (?session=...&token=...), когда игра запущена в iframe портала.
-    """
-
-    game_session_id, token = get_game_session()
-
+def resolve_game_session() -> dict | None:
+    """Проверяет HMAC, GameId и сохраняет профиль пользователя портала."""
+    game_session_id, token = _capture_game_session()
     if not game_session_id:
-        raise ApiError("Игра запущена не с портала: сессия не выдана.")
+        return None
     if not token:
         raise ApiError("Портал не передал токен игровой сессии.")
 
-    if amount <= 0:
-        raise ApiError("Количество баллов должно быть положительным")
+    expected_game_id = os.environ.get("LINGVO_GAME_ID")
+    if not expected_game_id or not expected_game_id.isdigit():
+        raise ApiError("LINGVO_GAME_ID не настроен для этой игры.")
 
-    response = requests.post(
-        f"{API_URL}/score",
-        json={"gameSessionId": game_session_id, "score": amount, "token": token},
-        timeout=TIMEOUT,
-    )
+    try:
+        response = requests.post(
+            f"{API_URL}/game/session/resolve",
+            json={"gameSessionId": game_session_id, "token": token},
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise ApiError(f"Портал недоступен: {exc}") from exc
+
+    if response.status_code == 401:
+        raise ApiError("Портал отклонил подпись игровой сессии.")
+    if response.status_code == 404:
+        raise ApiError("Игровая сессия не найдена.")
+    if response.status_code != 200:
+        raise ApiError(f"Ошибка API ({response.status_code}): {response.text}")
+
+    try:
+        data = response.json()
+    except requests.JSONDecodeError as exc:
+        raise ApiError("Портал вернул некорректный JSON.") from exc
+
+    if not isinstance(data, dict) or not data.get("valid") or not data.get("userId"):
+        raise ApiError("Портал вернул некорректную игровую сессию.")
+    if str(data.get("gameId")) != expected_game_id:
+        raise ApiError("Игровая сессия выдана для другой игры.")
+
+    session["game_session_id"] = game_session_id
+    session["game_session_token"] = token
+    session["portal_user_id"] = data["userId"]
+    session["portal_user_name"] = data.get("userName") or "Игрок"
+    session["portal_total_points"] = int(data.get("totalUserPoints", 0))
+    return data
+
+
+def post_points(amount: int) -> int:
+    """Однократно отправляет итог партии по подтверждённой игровой сессии."""
+    game_session_id = session.get("game_session_id")
+    token = session.get("game_session_token")
+    if not game_session_id or not token:
+        raise ApiError("Игра запущена не с портала: сессия не выдана.")
+    if not isinstance(amount, int) or amount <= 0:
+        raise ApiError("Количество баллов должно быть положительным целым числом.")
+
+    try:
+        response = requests.post(
+            f"{API_URL}/score",
+            json={"gameSessionId": game_session_id, "score": amount, "token": token},
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise ApiError(f"Портал недоступен: {exc}") from exc
 
     if response.status_code != 200:
-        raise ApiError(f"Ошибка API: {response.text}")
+        raise ApiError(f"Ошибка API ({response.status_code}): {response.text}")
 
-    data = response.json()
-
+    try:
+        data = response.json()
+    except requests.JSONDecodeError as exc:
+        raise ApiError("Портал вернул некорректный JSON.") from exc
     if not isinstance(data, dict) or "newTotalPoints" not in data:
         raise ApiError("API вернул некорректный ответ на начисление баллов.")
 
-    return data["newTotalPoints"]
+    session["portal_total_points"] = int(data["newTotalPoints"])
+    return session["portal_total_points"]

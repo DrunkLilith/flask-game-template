@@ -3,6 +3,8 @@
 Шаблон уже поддерживает актуальный контракт портала:
 
 - запуск через `/start?session=<id>&token=<hmac>`;
+- проверку сессии через `POST /api/game/session/resolve` и привязку к `LINGVO_GAME_ID`;
+- получение имени и общего счёта только из подтверждённой сессии;
 - отправку результата в `POST /api/score` по игровой сессии;
 - публикацию игры под внутренним маршрутом `/games/<slug>`;
 - отдельные cookie path и cookie name для каждой игры;
@@ -17,6 +19,7 @@
 
 ```powershell
 $env:LINGVO_API_URL = "http://localhost:5001/api"
+$env:LINGVO_GAME_ID = "123" # реальный ID игры в БД портала
 $env:APP_SECRET_KEY = "replace-with-a-long-random-value"
 $env:GAME_PORT = "5000"
 python -m pip install -r requirements.txt
@@ -32,6 +35,7 @@ python server.py
 ```yaml
 environment:
   LINGVO_API_URL: http://api:8080/api
+  LINGVO_GAME_ID: "123"
   APP_SECRET_KEY: ${GAMES_APP_SECRET}
   GAME_PORT: "8080"
   GAME_PATH_BASE: /games/my-game
