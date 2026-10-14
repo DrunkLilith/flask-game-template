@@ -1,2 +1,3 @@
 Flask
+gunicorn>=23,<24
 requests

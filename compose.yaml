@@ -1,0 +1,17 @@
+name: lingvogameos-flask-template
+
+services:
+  game:
+    build:
+      context: .
+    init: true
+    env_file:
+      - .env
+    environment:
+      GAME_PORT: "8080"
+      # Standalone Compose serves the game from /. The portal stack overrides
+      # this with /games/<slug> and keeps the container port internal.
+      GAME_PATH_BASE: ""
+    ports:
+      - "${GAME_HOST_PORT:-8080}:8080"
+    restart: unless-stopped
